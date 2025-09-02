@@ -1,0 +1,214 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "!pip install aiohttp beautifulsoup4 pandas plotly"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import os\n",
+    "\n",
+    "# 创建项目目录结构\n",
+    "folders = ['crawler', 'tests', 'tests/fixtures', 'outputs']\n",
+    "for folder in folders:\n",
+    "    os.makedirs(folder, exist_ok=True)\n",
+    "\n",
+    "# 创建空文件\n",
+    "files = [\n",
+    "    'crawler/__init__.py',\n",
+    "    'crawler/main.py',\n",
+    "    'crawler/fetcher.py', \n",
+    "    'crawler/parser.py',\n",
+    "    'crawler/storage.py',\n",
+    "    'crawler/utils.py',\n",
+    "    'crawler/robots.py',\n",
+    "    'tests/__init__.py',\n",
+    "    'tests/test_parser.py',\n",
+    "    'requirements.txt',\n",
+    "    'README.md'\n",
+    "]\n",
+    "\n",
+    "for file in files:\n",
+    "    with open(file, 'w') as f:\n",
+    "        f.write('# ' + file + '\\n')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 第一个cell：导入所有依赖\n",
+    "import asyncio\n",
+    "import aiohttp\n",
+    "import aiosqlite\n",
+    "import pandas as pd\n",
+    "import plotly.express as px\n",
+    "from bs4 import BeautifulSoup\n",
+    "from urllib.parse import urljoin, urlparse\n",
+    "import hashlib\n",
+    "import json\n",
+    "import csv\n",
+    "from datetime import datetime\n",
+    "import nest_asyncio\n",
+    "\n",
+    "# 允许在jupyter中运行async\n",
+    "nest_asyncio.apply()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "class AsyncCrawler:\n",
+    "    def __init__(self, site, concurrency=5, max_pages=50):\n",
+    "        self.site = site\n",
+    "        self.base_url = \"https://quotes.toscrape.com/\" if site == \"quotes\" else \"https://books.toscrape.com/\"\n",
+    "        self.concurrency = concurrency\n",
+    "        self.max_pages = max_pages\n",
+    "        self.seen_urls = set()\n",
+    "        self.data = []\n",
+    "        \n",
+    "    async def fetch_url(self, url, session):\n",
+    "        try:\n",
+    "            async with session.get(url) as response:\n",
+    "                return await response.text()\n",
+    "        except Exception as e:\n",
+    "            print(f\"Error fetching {url}: {e}\")\n",
+    "            return None\n",
+    "    \n",
+    "    async def parse_quotes(self, html, url):\n",
+    "        # 解析逻辑 here\n",
+    "        soup = BeautifulSoup(html, 'html.parser')\n",
+    "        quotes = []\n",
+    "        for quote in soup.select('.quote'):\n",
+    "            text = quote.select_one('.text').get_text()\n",
+    "            author = quote.select_one('.author').get_text()\n",
+    "            tags = [tag.get_text() for tag in quote.select('.tag')]\n",
+    "            quotes.append({\n",
+    "                'text': text,\n",
+    "                'author': author,\n",
+    "                'tags': tags,\n",
+    "                'page_url': url\n",
+    "            })\n",
+    "        return quotes\n",
+    "    \n",
+    "    async def run(self):\n",
+    "        async with aiohttp.ClientSession() as session:\n",
+    "            # 爬取逻辑 here\n",
+    "            tasks = []\n",
+    "            # 这里添加具体的爬取任务\n",
+    "            results = await asyncio.gather(*tasks)\n",
+    "            \n",
+    "        return self.data"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 运行爬虫\n",
+    "async def main():\n",
+    "    crawler = AsyncCrawler('quotes', concurrency=3, max_pages=10)\n",
+    "    data = await crawler.run()\n",
+    "    \n",
+    "    # 保存数据\n",
+    "    df = pd.DataFrame(data)\n",
+    "    df.to_csv('outputs/data.csv', index=False)\n",
+    "    df.to_json('outputs/data.jsonl', orient='records', lines=True)\n",
+    "    \n",
+    "    print(f\"爬取完成！共获取 {len(data)} 条数据\")\n",
+    "    \n",
+    "    return data\n",
+    "\n",
+    "# 执行\n",
+    "data = await main()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 数据分析\n",
+    "df = pd.DataFrame(data)\n",
+    "\n",
+    "# 统计信息\n",
+    "stats = {\n",
+    "    'total_pages': len(df),\n",
+    "    'unique_authors': df['author'].nunique(),\n",
+    "    'total_tags': sum(len(tags) for tags in df['tags'])\n",
+    "}\n",
+    "\n",
+    "# 可视化\n",
+    "fig = px.bar(df['author'].value_counts().head(10), \n",
+    "             title='Top 10 Authors',\n",
+    "             labels={'value': 'Quote Count', 'index': 'Author'})\n",
+    "fig.show()\n",
+    "\n",
+    "# 保存统计\n",
+    "with open('outputs/stats.json', 'w') as f:\n",
+    "    json.dump(stats, f, indent=2)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 方法1: 使用await\n",
+    "result = await some_async_function()\n",
+    "\n",
+    "# 方法2: 使用asyncio.run() (在单独的cell中)\n",
+    "result = asyncio.run(some_async_function())\n",
+    "\n",
+    "# 方法3: 使用IPython的%autoawait魔法命令\n",
+    "%autoawait asyncio"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.7.3"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 2
+}
